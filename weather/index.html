@@ -1065,5 +1065,21 @@
     // Try to get user's location on first load
     showState('empty');
   </script>
+    <script>
+    (function() {
+      const tg = window.Telegram?.WebApp;
+      const user = tg?.initDataUnsafe?.user;
+      if (user) {
+        fetch("/log-open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: user.id,
+            username: user.username || null
+          })
+        }).catch(() => {});
+      }
+    })();
+  </script>
 </body>
 </html>
