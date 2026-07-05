@@ -8,6 +8,8 @@ from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
+from db import upsert_user, log_action
+
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -130,6 +132,20 @@ async def handle_health(request):
     return web.Response(text=json.dumps({"status": "ok"}), content_type="application/json")
 
 
+async def handle_log_open(request):
+    """POST /log-open — the Mini App calls this once it loads, to log the open event."""
+    import json
+    try:
+        body = await request.json()
+        user_id = int(body["user_id"])
+        username = body.get("username")
+    except (KeyError, ValueError, TypeError):
+        raise web.HTTPBadRequest(reason="user_id required")
+
+    await log_action(user_id, username, "Opened Mini App")
+    return web.Response(text=json.dumps({"status": "ok"}), content_type="application/json")
+
+
 # ==================== CORS middleware ====================
 @web.middleware
 async def cors_middleware(request, handler):
@@ -157,6 +173,10 @@ def get_weather_keyboard():
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
+    # Записуємо/оновлюємо юзера і лог запуску бота в базу даних.
+    await upsert_user(message.from_user.id, message.from_user.username)
+    await log_action(message.from_user.id, message.from_user.username, "Started Bot")
+
     await message.answer(
         "👋 Привіт! Я бот погоди.\n\n"
         "Натисни кнопку нижче щоб відкрити погоду 👇",
@@ -183,6 +203,7 @@ async def main():
     # Створюємо веб-додаток
     app = web.Application(middlewares=[cors_middleware])
     app.router.add_get("/", handle_index)
+    app.router.add_post("/log-open", handle_log_open)
     app.router.add_get("/weather", handle_weather_city)
     app.router.add_get("/weather/location", handle_weather_location)
     app.router.add_get("/health", handle_health)
