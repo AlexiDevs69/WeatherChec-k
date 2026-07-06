@@ -8,7 +8,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
-from db import upsert_user, log_action
+from db import upsert_user, log_action, get_bot_settings
 
 load_dotenv()
 
@@ -17,6 +17,8 @@ OWM_API_KEY = os.getenv("OWM_API_KEY")
 PORT = int(os.getenv("PORT", 8000))
 PUBLIC_URL = os.getenv("PUBLIC_URL", f"http://localhost:{PORT}")  # ngrok url сюди
 OWM_BASE = "https://api.openweathermap.org/data/2.5"
+
+DEFAULT_MAINTENANCE_MESSAGE = "🛠 Бот тимчасово на технічних роботах. Спробуй, будь ласка, трохи пізніше."
 
 # ==================== HTML Mini App (вбудований) ====================
 HTML_CONTENT = open("index.html", encoding="utf-8").read() if os.path.exists("index.html") else """
@@ -162,6 +164,24 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 
 
+# --- Maintenance-mode gate --------------------------------------------------
+# Runs before EVERY message handler below (CommandStart, /weather, web_app_data,
+# etc.) because it's registered as an *outer* middleware on dp.message, not
+# something bolted onto each handler individually. One flip of the toggle on
+# /settings in the admin dashboard silences the whole bot instantly — no
+# redeploy, no restart, just one extra SELECT per incoming message.
+@dp.message.outer_middleware()
+async def maintenance_middleware(handler, event: Message, data):
+    settings = await get_bot_settings()
+
+    if settings["maintenance_mode"]:
+        text = settings["maintenance_message"] or DEFAULT_MAINTENANCE_MESSAGE
+        await event.answer(text)
+        return  # swallow the update -- handlers below never run
+
+    return await handler(event, data)
+
+
 def get_weather_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
@@ -177,11 +197,15 @@ async def cmd_start(message: Message):
     await upsert_user(message.from_user.id, message.from_user.username)
     await log_action(message.from_user.id, message.from_user.username, "Started Bot")
 
-    await message.answer(
+    # Текст привітання можна міняти з адмін-дашборду (/settings) без
+    # редеплою бота -- якщо там порожньо, залишається дефолтний текст.
+    settings = await get_bot_settings()
+    welcome_text = settings["welcome_message"] or (
         "👋 Привіт! Я бот погоди.\n\n"
-        "Натисни кнопку нижче щоб відкрити погоду 👇",
-        reply_markup=get_weather_keyboard()
+        "Натисни кнопку нижче щоб відкрити погоду 👇"
     )
+
+    await message.answer(welcome_text, reply_markup=get_weather_keyboard())
 
 
 @dp.message(Command("weather"))
