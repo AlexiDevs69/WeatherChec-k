@@ -43,3 +43,40 @@ async def log_action(user_id: int, username: str | None, action: str) -> None:
             """,
             user_id, username, action,
         )
+
+
+async def get_bot_settings() -> dict:
+    """
+    Reads the single bot_settings row maintained by the admin dashboard's
+    /settings page (id=1: welcome_message, maintenance_mode, maintenance_message).
+
+    Returns safe defaults instead of raising if:
+      - the table doesn't exist yet (dashboard hasn't been deployed/started
+        at least once), or
+      - the row doesn't exist yet (nobody opened /settings in the dashboard
+        yet, so the dashboard never inserted the default row).
+    This means the bot NEVER crashes because of the dashboard being out of
+    sync — worst case it just behaves as if maintenance mode is off and
+    the welcome message is unset.
+    """
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT welcome_message, maintenance_mode, maintenance_message
+                FROM bot_settings
+                WHERE id = 1
+                """
+            )
+    except asyncpg.exceptions.UndefinedTableError:
+        row = None
+
+    if row is None:
+        return {
+            "welcome_message": None,
+            "maintenance_mode": False,
+            "maintenance_message": None,
+        }
+
+    return dict(row)
